@@ -1,0 +1,361 @@
+
+/* Neon Apex — uma única interface adaptativa para PC e celular */
+
+html, body {
+  overscroll-behavior: none;
+}
+
+body.race-mode {
+  overflow: hidden;
+}
+
+.race-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.fullscreen-button {
+  border: 1px solid var(--line);
+  padding: 9px 12px;
+}
+
+.orientation-hint {
+  display: none;
+}
+
+.touch-controls {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .desktop-controls {
+    display: flex;
+  }
+}
+
+@media (hover: none), (pointer: coarse), (max-width: 900px) {
+  body.race-mode {
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .race-view {
+    min-height: 100dvh;
+    padding:
+      max(8px, env(safe-area-inset-top))
+      max(8px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom))
+      max(8px, env(safe-area-inset-left));
+  }
+
+  .race-header {
+    max-width: none;
+    margin-bottom: 8px;
+  }
+
+  .race-header .back-button {
+    padding: 8px 10px;
+  }
+
+  .race-header-actions {
+    gap: 6px;
+  }
+
+  .race-header-actions .text-button {
+    font-size: 9px;
+  }
+
+  .fullscreen-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .desktop-controls {
+    display: none !important;
+  }
+
+  .race-hud {
+    position: relative;
+    z-index: 20;
+    max-width: none;
+    gap: 8px;
+    margin: 0 0 8px;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .race-hud .hud-block {
+    min-width: 0;
+    padding: 6px 7px;
+    border: 1px solid rgba(98, 224, 255, .16);
+    background: rgba(5, 9, 20, .74);
+  }
+
+  .race-hud .hud-block > span {
+    font-size: 7px;
+  }
+
+  .race-hud .hud-block strong {
+    font-size: clamp(18px, 4vw, 27px);
+    white-space: nowrap;
+  }
+
+  .race-hud .timer-block {
+    margin-left: 0;
+    text-align: left;
+  }
+
+  .race-hud .nitro-block {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .race-hud .nitro-bar {
+    width: 100%;
+  }
+
+  .coin-hud {
+    display: block;
+  }
+
+  .track-frame {
+    width: 100%;
+    max-width: none;
+    height: min(61dvh, 620px);
+    margin: 0;
+    border-width: 1px;
+  }
+
+  .track-frame canvas {
+    width: 100%;
+    height: 100%;
+  }
+
+  .race-message {
+    left: 10px;
+    bottom: 10px;
+    max-width: min(62%, 360px);
+    padding: 7px 9px;
+  }
+
+  .race-message strong {
+    font-size: 8px;
+  }
+
+  .race-message span {
+    font-size: 8px;
+    line-height: 1.35;
+  }
+
+  .touch-controls {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 120;
+    display: flex;
+    justify-content: space-between;
+    align-items: end;
+    gap: 16px;
+    padding:
+      12px
+      max(14px, env(safe-area-inset-right))
+      max(14px, env(safe-area-inset-bottom))
+      max(14px, env(safe-area-inset-left));
+    pointer-events: none;
+  }
+
+  .touch-cluster {
+    display: flex;
+    align-items: end;
+    gap: 10px;
+    pointer-events: auto;
+  }
+
+  .touch-button {
+    min-width: 68px;
+    height: 58px;
+    padding: 0 14px;
+    border: 1px solid rgba(255,255,255,.24);
+    border-radius: 14px;
+    background: rgba(7, 12, 23, .82);
+    color: var(--white);
+    font-weight: 800;
+    letter-spacing: .04em;
+    box-shadow: 0 6px 24px rgba(0,0,0,.28);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    touch-action: none;
+  }
+
+  .touch-button.pressed,
+  .touch-button:active {
+    transform: translateY(2px) scale(.98);
+    border-color: var(--acid);
+    box-shadow: 0 0 20px rgba(215,255,69,.2);
+  }
+
+  .steer-button {
+    width: 72px;
+    font-size: 30px;
+  }
+
+  .accelerate-button {
+    height: 72px;
+    min-width: 78px;
+    background: linear-gradient(180deg, rgba(29,227,255,.28), rgba(10,20,35,.9));
+    border-color: rgba(29,227,255,.58);
+  }
+
+  .brake-button {
+    min-width: 72px;
+    background: linear-gradient(180deg, rgba(255,64,93,.25), rgba(25,10,16,.9));
+    border-color: rgba(255,64,93,.5);
+  }
+
+  .nitro-button {
+    min-width: 84px;
+    background: linear-gradient(180deg, rgba(215,255,69,.88), rgba(128,166,20,.9));
+    color: #091015;
+    border-color: rgba(215,255,69,.9);
+  }
+
+  .orientation-hint {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    z-index: 80;
+    transform: translateX(-50%);
+    display: none;
+    padding: 7px 10px;
+    border: 1px solid rgba(215,255,69,.38);
+    background: rgba(5,9,20,.88);
+    color: var(--acid);
+    font-size: 9px;
+    letter-spacing: .04em;
+    pointer-events: none;
+  }
+
+  .orientation-hint.visible {
+    display: block;
+  }
+
+  .countdown {
+    font-size: clamp(74px, 18vw, 120px);
+  }
+}
+
+@media (hover: none) and (orientation: landscape),
+       (max-width: 900px) and (orientation: landscape) {
+  .race-view {
+    padding-top: max(5px, env(safe-area-inset-top));
+  }
+
+  .race-header {
+    margin-bottom: 4px;
+  }
+
+  .race-status {
+    display: flex;
+  }
+
+  .race-hud {
+    position: absolute;
+    top: max(48px, env(safe-area-inset-top));
+    left: max(12px, env(safe-area-inset-left));
+    right: max(12px, env(safe-area-inset-right));
+    z-index: 30;
+    grid-template-columns: repeat(6, auto);
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .race-hud .hud-block {
+    padding: 4px 8px;
+  }
+
+  .race-hud .nitro-block {
+    grid-column: auto;
+    min-width: 120px;
+  }
+
+  .track-frame {
+    height: calc(100dvh - 58px);
+  }
+
+  .race-message {
+    bottom: 82px;
+  }
+
+  .touch-controls {
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  .touch-button {
+    height: 54px;
+  }
+
+  .accelerate-button {
+    height: 66px;
+  }
+}
+
+@media (hover: none) and (orientation: portrait),
+       (max-width: 700px) and (orientation: portrait) {
+  .race-status {
+    display: none;
+  }
+
+  .fullscreen-button {
+    font-size: 0 !important;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+  }
+
+  .fullscreen-button::after {
+    content: "⛶";
+    font-size: 18px;
+  }
+
+  .track-frame {
+    height: min(55dvh, 620px);
+  }
+
+  .touch-controls {
+    bottom: 2px;
+  }
+
+  .touch-cluster {
+    gap: 7px;
+  }
+
+  .touch-button {
+    min-width: 58px;
+    height: 54px;
+    padding: 0 9px;
+    font-size: 10px;
+  }
+
+  .steer-button {
+    width: 62px;
+    font-size: 27px;
+  }
+
+  .accelerate-button {
+    min-width: 66px;
+    height: 64px;
+  }
+
+  .nitro-button {
+    min-width: 72px;
+  }
+
+  .race-message {
+    bottom: 80px;
+  }
+}

@@ -2,7 +2,9 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#050914">
   <title>Neon Apex</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -10,6 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="progression.css">
+  <link rel="stylesheet" href="responsive.css">
 </head>
 <body>
   <div class="ambient-grid" aria-hidden="true"></div>
@@ -94,7 +97,10 @@
       <header class="race-header">
         <button class="back-button" id="backGarageButton" type="button">← GARAGEM</button>
         <div class="race-status"><span class="online-indicator"></span><span id="raceTrackName">NEON CITY</span><span class="divider"></span><span id="racePlayer">PILOTO</span></div>
-        <button class="text-button" id="restartButton" type="button">reiniciar ↻</button>
+        <div class="race-header-actions">
+          <button class="text-button fullscreen-button" id="fullscreenButton" type="button" aria-label="Alternar tela cheia">tela cheia ⛶</button>
+          <button class="text-button" id="restartButton" type="button">reiniciar ↻</button>
+        </div>
       </header>
 
       <div class="race-hud">
@@ -109,11 +115,28 @@
       <div class="track-frame">
         <canvas id="raceCanvas" width="1000" height="620" aria-label="Pista de corrida"></canvas>
         <div class="countdown" id="countdown">3</div>
-        <div class="race-message" id="raceMessage"><strong>DISPUTA DE POSIÇÃO</strong><span>WASD/SETAS para dirigir. SHIFT ativa nitro. Encoste lateralmente para empurrar rivais.</span></div>
+        <div class="race-message" id="raceMessage"><strong>DISPUTA DE POSIÇÃO</strong><span id="raceControlHint">WASD/SETAS para dirigir. SHIFT ativa nitro. Encoste lateralmente para empurrar rivais.</span></div>
+        <div class="orientation-hint" id="orientationHint" aria-live="polite">No celular, a visão fica melhor na horizontal.</div>
       </div>
 
-      <div class="race-controls"><span><kbd>W</kbd> acelerar</span><span><kbd>S</kbd> frear</span><span><kbd>A</kbd><kbd>D</kbd> direção</span><span><kbd>SHIFT</kbd> nitro</span></div>
-      <div class="touch-controls" id="touchControls"><button data-control="left">←</button><button data-control="brake">■</button><button data-control="up">↑</button><button data-control="nitro">⚡</button><button data-control="right">→</button></div>
+      <div class="race-controls desktop-controls">
+        <span><kbd>W</kbd> acelerar</span>
+        <span><kbd>S</kbd> frear</span>
+        <span><kbd>A</kbd><kbd>D</kbd> direção</span>
+        <span><kbd>SHIFT</kbd> nitro</span>
+      </div>
+
+      <div class="touch-controls" id="touchControls" aria-label="Controles para celular">
+        <div class="touch-cluster steering-cluster">
+          <button class="touch-button steer-button" data-control="left" type="button" aria-label="Virar para a esquerda">←</button>
+          <button class="touch-button steer-button" data-control="right" type="button" aria-label="Virar para a direita">→</button>
+        </div>
+        <div class="touch-cluster action-cluster">
+          <button class="touch-button brake-button" data-control="brake" type="button" aria-label="Frear">FREIO</button>
+          <button class="touch-button accelerate-button" data-control="up" type="button" aria-label="Acelerar">ACEL</button>
+          <button class="touch-button nitro-button" data-control="nitro" type="button" aria-label="Ativar nitro">⚡ NITRO</button>
+        </div>
+      </div>
     </section>
 
     <section class="view info-view" id="profileView">
