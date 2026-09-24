@@ -9,7 +9,7 @@ binding = "ASSETS"
 [[d1_databases]]
 binding = "DB"
 database_name = "neon-apex-local"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "12345678-abcd-4321-9876-abcdef123456"
 
 # Para produção no Cloudflare, substitua pelo banco D1 real do projeto.
 # Não coloque senhas ou segredos neste arquivo.
