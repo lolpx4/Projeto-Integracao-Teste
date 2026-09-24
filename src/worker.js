@@ -1,3 +1,4 @@
+
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const MIN_RACE_MS = 15000;
 const MAX_RACE_MS = 1000 * 60 * 15;
@@ -10,9 +11,18 @@ const TRACKS = {
 };
 
 const CARS = {
-  red: { key: 'red', name: 'VOLT R', speed: 90, acceleration: 84, braking: 77, handling: 72, nitro: 80 },
-  purple: { key: 'purple', name: 'VIOLET X', speed: 85, acceleration: 92, braking: 70, handling: 90, nitro: 88 },
-  blue: { key: 'blue', name: 'OCEAN GT', speed: 96, acceleration: 76, braking: 82, handling: 78, nitro: 94 },
+  red: {
+    key: 'red', name: 'VOLT R', price: 0, tier: 1,
+    speed: 72, acceleration: 72, braking: 68, handling: 70, nitro: 65,
+  },
+  purple: {
+    key: 'purple', name: 'VIOLET X', price: 7500, tier: 2,
+    speed: 82, acceleration: 86, braking: 75, handling: 88, nitro: 80,
+  },
+  blue: {
+    key: 'blue', name: 'OCEAN GT', price: 18000, tier: 3,
+    speed: 94, acceleration: 80, braking: 86, handling: 82, nitro: 94,
+  },
 };
 
 const UPGRADE_STATS = new Set(['speed', 'acceleration', 'braking', 'handling', 'nitro']);
@@ -66,10 +76,17 @@ const SCHEMA = [
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (username, car)
   );`,
+  `CREATE TABLE IF NOT EXISTS owned_cars (
+    username TEXT NOT NULL,
+    car TEXT NOT NULL,
+    purchased_at INTEGER NOT NULL,
+    PRIMARY KEY (username, car)
+  );`,
   `CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);`,
   `CREATE INDEX IF NOT EXISTS idx_race_results_time ON race_results(time_ms);`,
   `CREATE INDEX IF NOT EXISTS idx_race_results_user ON race_results(username);`,
   `CREATE INDEX IF NOT EXISTS idx_race_results_track ON race_results(track);`,
+  `CREATE INDEX IF NOT EXISTS idx_owned_cars_user ON owned_cars(username);`,
 ];
 
 let schemaReady = false;
@@ -94,6 +111,13 @@ export default {
 async function ensureSchema(env) {
   if (schemaReady) return;
   for (const statement of SCHEMA) await env.DB.prepare(statement).run();
+
+  // Todo usuário existente recebe o carro inicial, sem apagar nenhum progresso.
+  await env.DB.prepare(`
+    INSERT OR IGNORE INTO owned_cars (username, car, purchased_at)
+    SELECT username, 'red', created_at FROM users
+  `).run();
+
   schemaReady = true;
 }
 
@@ -102,7 +126,15 @@ async function handleApi(request, env, url) {
   const method = request.method.toUpperCase();
 
   if (pathname === '/api/health' && method === 'GET') {
-    return json({ ok: true, service: 'neon-apex', database: 'd1', progression: true, tracks: Object.keys(TRACKS) });
+    return json({
+      ok: true,
+      service: 'neon-apex',
+      database: 'd1',
+      progression: true,
+      competitive: true,
+      carOwnership: true,
+      tracks: Object.keys(TRACKS),
+    });
   }
 
   if (pathname === '/api/register' && method === 'POST') {
@@ -118,28 +150,42 @@ async function handleApi(request, env, url) {
     const salt = randomToken(16);
     const hash = await hashPassword(password, salt);
     const now = Date.now();
-    await env.DB.prepare(`
-      INSERT INTO users (username, password_hash, password_salt, level, xp, coins, races, best_time, selected_car, created_at, updated_at)
-      VALUES (?, ?, ?, 1, 0, 1000, 0, NULL, 'red', ?, ?)
-    `).bind(username, hash, salt, now, now).run();
+
+    await env.DB.batch([
+      env.DB.prepare(`
+        INSERT INTO users (
+          username, password_hash, password_salt, level, xp, coins, races,
+          best_time, selected_car, created_at, updated_at
+        )
+        VALUES (?, ?, ?, 1, 0, 1000, 0, NULL, 'red', ?, ?)
+      `).bind(username, hash, salt, now, now),
+      env.DB.prepare(`
+        INSERT INTO owned_cars (username, car, purchased_at)
+        VALUES (?, 'red', ?)
+      `).bind(username, now),
+    ]);
 
     const token = await createSession(env, username);
-    return json({ ok: true, token, profile: await getProfile(env, username), upgrades: await getAllUpgrades(env, username) }, 201);
+    return json(await authPayload(env, username, token), 201);
   }
 
   if (pathname === '/api/login' && method === 'POST') {
     const data = await readJson(request);
     const username = sanitizeUsername(data.player);
     const password = String(data.password || '');
+
     const validation = validateCredentials(username, password);
     if (validation) return json({ error: 'Usuário ou senha inválidos.' }, 400);
 
     const user = await env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(username).first();
     if (!user) return json({ error: 'Usuário ou senha inválidos.' }, 401);
-    if (!await verifyPassword(password, user.password_salt, user.password_hash)) return json({ error: 'Usuário ou senha inválidos.' }, 401);
 
+    const valid = await verifyPassword(password, user.password_salt, user.password_hash);
+    if (!valid) return json({ error: 'Usuário ou senha inválidos.' }, 401);
+
+    await ensureStarterOwnership(env, username, user.created_at);
     const token = await createSession(env, username);
-    return json({ ok: true, token, profile: publicProfile(user), upgrades: await getAllUpgrades(env, username) });
+    return json(await authPayload(env, username, token));
   }
 
   if (pathname === '/api/logout' && method === 'POST') {
@@ -151,36 +197,91 @@ async function handleApi(request, env, url) {
   if (pathname === '/api/cars' && method === 'GET') {
     const session = await requireSession(request, env);
     if (session.response) return session.response;
-    return json({ cars: Object.values(CARS) });
+    return json({
+      cars: Object.values(CARS),
+      ownedCars: await getOwnedCars(env, session.username),
+    });
   }
 
   if (pathname === '/api/profile' && method === 'GET') {
     const session = await requireSession(request, env);
     if (session.response) return session.response;
-    return json({ ok: true, profile: await getProfile(env, session.username), cars: Object.values(CARS), upgrades: await getAllUpgrades(env, session.username) });
+    return json({
+      ok: true,
+      profile: await getProfile(env, session.username),
+      cars: Object.values(CARS),
+      upgrades: await getAllUpgrades(env, session.username),
+      ownedCars: await getOwnedCars(env, session.username),
+    });
+  }
+
+  if (pathname === '/api/car/buy' && method === 'POST') {
+    const session = await requireSession(request, env);
+    if (session.response) return session.response;
+
+    const data = await readJson(request);
+    const carKey = String(data.car || '');
+    const car = CARS[carKey];
+    if (!car) return json({ error: 'Carro inválido.' }, 400);
+    if (car.price <= 0) return json({ error: 'Este carro já é o carro inicial.' }, 409);
+
+    const alreadyOwned = await ownsCar(env, session.username, carKey);
+    if (alreadyOwned) return json({ error: 'Você já possui este carro.' }, 409);
+
+    const user = await env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(session.username).first();
+    if (!user) return json({ error: 'Usuário não encontrado.' }, 401);
+    if (Number(user.coins || 0) < car.price) return json({ error: `Você precisa de ${car.price} moedas.` }, 400);
+
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare('UPDATE users SET coins = coins - ?, selected_car = ?, updated_at = ? WHERE username = ?')
+        .bind(car.price, carKey, now, session.username),
+      env.DB.prepare('INSERT INTO owned_cars (username, car, purchased_at) VALUES (?, ?, ?)')
+        .bind(session.username, carKey, now),
+    ]);
+
+    return json({
+      ok: true,
+      purchasedCar: carKey,
+      profile: await getProfile(env, session.username),
+      ownedCars: await getOwnedCars(env, session.username),
+      upgrades: await getAllUpgrades(env, session.username),
+    });
   }
 
   if (pathname === '/api/profile/car' && method === 'POST') {
     const session = await requireSession(request, env);
     if (session.response) return session.response;
+
     const data = await readJson(request);
     const car = String(data.car || '');
     if (!CARS[car]) return json({ error: 'Carro inválido.' }, 400);
-    await env.DB.prepare('UPDATE users SET selected_car = ?, updated_at = ? WHERE username = ?').bind(car, Date.now(), session.username).run();
-    return json({ ok: true, profile: await getProfile(env, session.username) });
+    if (!await ownsCar(env, session.username, car)) return json({ error: 'Você ainda não possui este carro.' }, 403);
+
+    await env.DB.prepare('UPDATE users SET selected_car = ?, updated_at = ? WHERE username = ?')
+      .bind(car, Date.now(), session.username).run();
+
+    return json({
+      ok: true,
+      profile: await getProfile(env, session.username),
+      ownedCars: await getOwnedCars(env, session.username),
+    });
   }
 
   if (pathname === '/api/upgrade' && method === 'POST') {
     const session = await requireSession(request, env);
     if (session.response) return session.response;
+
     const data = await readJson(request);
     const car = String(data.car || '');
     const stat = String(data.stat || '');
     if (!CARS[car]) return json({ error: 'Carro inválido.' }, 400);
     if (!UPGRADE_STATS.has(stat)) return json({ error: 'Melhoria inválida.' }, 400);
+    if (!await ownsCar(env, session.username, car)) return json({ error: 'Compre o carro antes de melhorá-lo.' }, 403);
 
     const user = await env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(session.username).first();
     if (!user) return json({ error: 'Usuário não encontrado.' }, 401);
+
     const upgrades = await getUpgradeRow(env, session.username, car);
     const currentLevel = Number(upgrades[stat] || 0);
     if (currentLevel >= MAX_UPGRADE_LEVEL) return json({ error: 'Este atributo já está no nível máximo.' }, 409);
@@ -190,8 +291,10 @@ async function handleApi(request, env, url) {
 
     const next = { ...upgrades, [stat]: currentLevel + 1 };
     const now = Date.now();
+
     await env.DB.batch([
-      env.DB.prepare('UPDATE users SET coins = coins - ?, updated_at = ? WHERE username = ?').bind(cost, now, session.username),
+      env.DB.prepare('UPDATE users SET coins = coins - ?, updated_at = ? WHERE username = ?')
+        .bind(cost, now, session.username),
       env.DB.prepare(`
         INSERT INTO car_upgrades (username, car, speed, acceleration, braking, handling, nitro, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -205,22 +308,36 @@ async function handleApi(request, env, url) {
       `).bind(session.username, car, next.speed, next.acceleration, next.braking, next.handling, next.nitro, now),
     ]);
 
-    return json({ ok: true, cost, profile: await getProfile(env, session.username), upgrades: await getAllUpgrades(env, session.username) });
+    return json({
+      ok: true,
+      cost,
+      profile: await getProfile(env, session.username),
+      upgrades: await getAllUpgrades(env, session.username),
+      ownedCars: await getOwnedCars(env, session.username),
+    });
   }
 
   if (pathname === '/api/race/cancel' && method === 'POST') {
     const session = await requireSession(request, env);
     if (session.response) return session.response;
+
     const data = await readJson(request);
     const raceId = String(data.raceId || '');
     if (!raceId) return json({ ok: true });
-    await env.DB.prepare("UPDATE race_runs SET status = 'cancelled', finished_at = ? WHERE id = ? AND username = ? AND status = 'active'")
-      .bind(Date.now(), raceId, session.username).run();
+
+    await env.DB.prepare(`
+      UPDATE race_runs
+      SET status = 'cancelled', finished_at = ?
+      WHERE id = ? AND username = ? AND status = 'active'
+    `).bind(Date.now(), raceId, session.username).run();
+
     return json({ ok: true });
   }
 
   if (pathname === '/api/leaderboard' && method === 'GET') {
-    const track = TRACKS[url.searchParams.get('track')] ? url.searchParams.get('track') : 'neon-city';
+    const requestedTrack = url.searchParams.get('track');
+    const track = TRACKS[requestedTrack] ? requestedTrack : 'neon-city';
+
     const result = await env.DB.prepare(`
       SELECT rr.username AS player, MIN(rr.time_ms) AS time
       FROM race_results rr
@@ -229,43 +346,60 @@ async function handleApi(request, env, url) {
       ORDER BY time ASC, player ASC
       LIMIT 10
     `).bind(track).all();
+
     return json({ track, scores: result.results || [] });
   }
 
   if (pathname === '/api/race/start' && method === 'POST') {
     const session = await requireSession(request, env);
     if (session.response) return session.response;
+
     const data = await readJson(request);
     const car = String(data.car || 'red');
     const track = String(data.track || 'neon-city');
+
     if (!CARS[car]) return json({ error: 'Carro inválido.' }, 400);
     if (!TRACKS[track]) return json({ error: 'Circuito inválido.' }, 400);
+    if (!await ownsCar(env, session.username, car)) return json({ error: 'Você ainda não possui este carro.' }, 403);
 
     const now = Date.now();
     const raceId = randomToken(24);
-    await env.DB.prepare(`
-      INSERT INTO race_runs (id, username, car, track, started_at, status)
-      VALUES (?, ?, ?, ?, ?, 'active')
-    `).bind(raceId, session.username, car, track, now).run();
-    await env.DB.prepare('UPDATE users SET selected_car = ?, updated_at = ? WHERE username = ?').bind(car, now, session.username).run();
+
+    await env.DB.batch([
+      env.DB.prepare(`
+        INSERT INTO race_runs (id, username, car, track, started_at, status)
+        VALUES (?, ?, ?, ?, ?, 'active')
+      `).bind(raceId, session.username, car, track, now),
+      env.DB.prepare('UPDATE users SET selected_car = ?, updated_at = ? WHERE username = ?')
+        .bind(car, now, session.username),
+    ]);
+
     return json({ ok: true, raceId, startedAt: now, track });
   }
 
   if (pathname === '/api/race/finish' && method === 'POST') {
     const session = await requireSession(request, env);
     if (session.response) return session.response;
+
     const data = await readJson(request);
     const raceId = String(data.raceId || '');
     if (!raceId) return json({ error: 'Corrida inválida.' }, 400);
 
-    const race = await env.DB.prepare('SELECT * FROM race_runs WHERE id = ? AND username = ?').bind(raceId, session.username).first();
-    if (!race || race.status !== 'active') return json({ error: 'Corrida não encontrada ou já finalizada.' }, 409);
+    const race = await env.DB.prepare('SELECT * FROM race_runs WHERE id = ? AND username = ?')
+      .bind(raceId, session.username).first();
+
+    if (!race || race.status !== 'active') {
+      return json({ error: 'Corrida não encontrada ou já finalizada.' }, 409);
+    }
 
     const now = Date.now();
     const elapsed = now - Number(race.started_at);
+
     if (elapsed < MIN_RACE_MS) return json({ error: 'Resultado inválido: corrida concluída rápido demais.' }, 400);
+
     if (elapsed > MAX_RACE_MS) {
-      await env.DB.prepare("UPDATE race_runs SET status = 'expired', finished_at = ? WHERE id = ?").bind(now, raceId).run();
+      await env.DB.prepare("UPDATE race_runs SET status = 'expired', finished_at = ? WHERE id = ?")
+        .bind(now, raceId).run();
       return json({ error: 'A corrida expirou.' }, 400);
     }
 
@@ -274,20 +408,34 @@ async function handleApi(request, env, url) {
 
     const track = TRACKS[race.track] || TRACKS['neon-city'];
     const requestedCoins = Number.parseInt(data.collectedCoins, 10);
-    const collectedCoins = Number.isFinite(requestedCoins) ? Math.max(0, Math.min(track.coinCount, requestedCoins)) : 0;
-    const rewards = computeRewards(elapsed, collectedCoins, track);
+    const collectedCoins = Number.isFinite(requestedCoins)
+      ? Math.max(0, Math.min(track.coinCount, requestedCoins))
+      : 0;
+
+    const requestedPosition = Number.parseInt(data.finalPosition, 10);
+    const finalPosition = Number.isFinite(requestedPosition)
+      ? Math.max(1, Math.min(4, requestedPosition))
+      : 4;
+
+    const rewards = computeRewards(finalPosition, collectedCoins, track);
     const nextXp = Number(user.xp || 0) + rewards.xp;
     const nextCoins = Number(user.coins || 0) + rewards.coins;
     const nextLevel = computeLevel(nextXp);
-    const nextBest = user.best_time == null ? elapsed : Math.min(Number(user.best_time), elapsed);
+    const nextBest = user.best_time == null
+      ? elapsed
+      : Math.min(Number(user.best_time), elapsed);
 
     await env.DB.batch([
-      env.DB.prepare("UPDATE race_runs SET status = 'finished', finished_at = ? WHERE id = ?").bind(now, raceId),
-      env.DB.prepare('INSERT INTO race_results (username, time_ms, car, track, created_at) VALUES (?, ?, ?, ?, ?)')
-        .bind(session.username, elapsed, race.car, race.track, now),
+      env.DB.prepare("UPDATE race_runs SET status = 'finished', finished_at = ? WHERE id = ?")
+        .bind(now, raceId),
+      env.DB.prepare(`
+        INSERT INTO race_results (username, time_ms, car, track, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).bind(session.username, elapsed, race.car, race.track, now),
       env.DB.prepare(`
         UPDATE users
-        SET races = races + 1, xp = ?, coins = ?, level = ?, best_time = ?, selected_car = ?, updated_at = ?
+        SET races = races + 1, xp = ?, coins = ?, level = ?, best_time = ?,
+            selected_car = ?, updated_at = ?
         WHERE username = ?
       `).bind(nextXp, nextCoins, nextLevel, nextBest, race.car, now, session.username),
     ]);
@@ -296,67 +444,136 @@ async function handleApi(request, env, url) {
       ok: true,
       time: elapsed,
       track: race.track,
+      finalPosition,
       collectedCoins,
       rewards,
       profile: await getProfile(env, session.username),
       upgrades: await getAllUpgrades(env, session.username),
+      ownedCars: await getOwnedCars(env, session.username),
     });
   }
 
   return json({ error: 'Rota não encontrada.' }, 404);
 }
 
+async function authPayload(env, username, token) {
+  return {
+    ok: true,
+    token,
+    profile: await getProfile(env, username),
+    upgrades: await getAllUpgrades(env, username),
+    ownedCars: await getOwnedCars(env, username),
+  };
+}
+
 function upgradeCost(level) {
   return 400 + Number(level || 0) * 550;
 }
 
-async function getUpgradeRow(env, username, car) {
-  const row = await env.DB.prepare('SELECT speed, acceleration, braking, handling, nitro FROM car_upgrades WHERE username = ? AND car = ?')
+async function ensureStarterOwnership(env, username, createdAt = Date.now()) {
+  await env.DB.prepare(`
+    INSERT OR IGNORE INTO owned_cars (username, car, purchased_at)
+    VALUES (?, 'red', ?)
+  `).bind(username, Number(createdAt || Date.now())).run();
+}
+
+async function getOwnedCars(env, username) {
+  await ensureStarterOwnership(env, username);
+  const result = await env.DB.prepare('SELECT car FROM owned_cars WHERE username = ? ORDER BY purchased_at ASC')
+    .bind(username).all();
+
+  const keys = (result.results || []).map((row) => row.car).filter((car) => CARS[car]);
+  if (!keys.includes('red')) keys.unshift('red');
+  return keys;
+}
+
+async function ownsCar(env, username, car) {
+  if (car === 'red') {
+    await ensureStarterOwnership(env, username);
+    return true;
+  }
+  const row = await env.DB.prepare('SELECT 1 AS ok FROM owned_cars WHERE username = ? AND car = ?')
     .bind(username, car).first();
+  return Boolean(row);
+}
+
+async function getUpgradeRow(env, username, car) {
+  const row = await env.DB.prepare(`
+    SELECT speed, acceleration, braking, handling, nitro
+    FROM car_upgrades
+    WHERE username = ? AND car = ?
+  `).bind(username, car).first();
+
   return row || { speed: 0, acceleration: 0, braking: 0, handling: 0, nitro: 0 };
 }
 
 async function getAllUpgrades(env, username) {
-  const result = await env.DB.prepare('SELECT car, speed, acceleration, braking, handling, nitro FROM car_upgrades WHERE username = ?').bind(username).all();
+  const result = await env.DB.prepare(`
+    SELECT car, speed, acceleration, braking, handling, nitro
+    FROM car_upgrades
+    WHERE username = ?
+  `).bind(username).all();
+
   const upgrades = {};
-  for (const key of Object.keys(CARS)) upgrades[key] = { speed: 0, acceleration: 0, braking: 0, handling: 0, nitro: 0 };
+  for (const key of Object.keys(CARS)) {
+    upgrades[key] = { speed: 0, acceleration: 0, braking: 0, handling: 0, nitro: 0 };
+  }
+
   for (const row of result.results || []) {
     if (!CARS[row.car]) continue;
     upgrades[row.car] = {
-      speed: Number(row.speed || 0), acceleration: Number(row.acceleration || 0), braking: Number(row.braking || 0),
-      handling: Number(row.handling || 0), nitro: Number(row.nitro || 0),
+      speed: Number(row.speed || 0),
+      acceleration: Number(row.acceleration || 0),
+      braking: Number(row.braking || 0),
+      handling: Number(row.handling || 0),
+      nitro: Number(row.nitro || 0),
     };
   }
+
   return upgrades;
 }
 
 async function createSession(env, username) {
   const token = randomToken(32);
   const now = Date.now();
+
   await env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?').bind(now).run();
-  await env.DB.prepare('INSERT INTO sessions (token, username, created_at, expires_at) VALUES (?, ?, ?, ?)')
-    .bind(token, username, now, now + SESSION_TTL_MS).run();
+  await env.DB.prepare(`
+    INSERT INTO sessions (token, username, created_at, expires_at)
+    VALUES (?, ?, ?, ?)
+  `).bind(token, username, now, now + SESSION_TTL_MS).run();
+
   return token;
 }
 
 async function requireSession(request, env) {
   const token = getBearer(request);
   if (!token) return { response: json({ error: 'Sessão não encontrada.' }, 401) };
+
   const session = await env.DB.prepare('SELECT * FROM sessions WHERE token = ?').bind(token).first();
+
   if (!session || Number(session.expires_at) < Date.now()) {
     if (session) await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
     return { response: json({ error: 'Sessão expirada. Entre novamente.' }, 401) };
   }
+
   return { username: session.username, token };
 }
 
 async function getProfile(env, username) {
   const user = await env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(username).first();
-  return publicProfile(user);
-}
-
-function publicProfile(user) {
   if (!user) return null;
+
+  await ensureStarterOwnership(env, username, user.created_at);
+  const owned = await getOwnedCars(env, username);
+
+  let selectedCar = CARS[user.selected_car] ? user.selected_car : 'red';
+  if (!owned.includes(selectedCar)) {
+    selectedCar = 'red';
+    await env.DB.prepare('UPDATE users SET selected_car = ?, updated_at = ? WHERE username = ?')
+      .bind('red', Date.now(), username).run();
+  }
+
   return {
     player: user.username,
     level: Number(user.level || 1),
@@ -364,7 +581,7 @@ function publicProfile(user) {
     coins: Number(user.coins || 0),
     races: Number(user.races || 0),
     bestTime: user.best_time == null ? null : Number(user.best_time),
-    selectedCar: CARS[user.selected_car] ? user.selected_car : 'red',
+    selectedCar,
   };
 }
 
@@ -372,12 +589,17 @@ function computeLevel(xp) {
   return Math.max(1, Math.floor(Number(xp || 0) / 500) + 1);
 }
 
-function computeRewards(timeMs, collectedCoins, track) {
-  const seconds = timeMs / 1000;
-  const baseCoins = Math.max(180, Math.min(650, Math.round(820 - seconds * 4.5)));
+function computeRewards(finalPosition, collectedCoins, track) {
+  const placementCoins = { 1: 1200, 2: 850, 3: 600, 4: 350 }[finalPosition] || 350;
+  const xp = { 1: 400, 2: 300, 3: 220, 4: 150 }[finalPosition] || 150;
   const pickupCoins = collectedCoins * track.coinValue;
-  const xp = Math.max(100, Math.min(420, Math.round(460 - seconds * 2.2)));
-  return { coins: baseCoins + pickupCoins, baseCoins, pickupCoins, xp };
+
+  return {
+    coins: placementCoins + pickupCoins,
+    placementCoins,
+    pickupCoins,
+    xp,
+  };
 }
 
 function validateCredentials(username, password) {
@@ -397,15 +619,30 @@ function getBearer(request) {
 }
 
 async function readJson(request) {
-  try { return await request.json(); } catch { return {}; }
+  try {
+    return await request.json();
+  } catch {
+    return {};
+  }
 }
 
 async function hashPassword(password, saltHex) {
   const encoder = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  );
+
   const bits = await crypto.subtle.deriveBits({
-    name: 'PBKDF2', salt: hexToBytes(saltHex), iterations: 100000, hash: 'SHA-256',
+    name: 'PBKDF2',
+    salt: hexToBytes(saltHex),
+    iterations: 100000,
+    hash: 'SHA-256',
   }, keyMaterial, 256);
+
   return bytesToHex(new Uint8Array(bits));
 }
 
@@ -417,7 +654,9 @@ async function verifyPassword(password, salt, expectedHash) {
 function timingSafeStringEqual(a, b) {
   if (a.length !== b.length) return false;
   let mismatch = 0;
-  for (let i = 0; i < a.length; i += 1) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  for (let i = 0; i < a.length; i += 1) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
   return mismatch === 0;
 }
 
@@ -434,7 +673,9 @@ function bytesToHex(bytes) {
 function hexToBytes(hex) {
   const clean = String(hex || '');
   const bytes = new Uint8Array(Math.floor(clean.length / 2));
-  for (let i = 0; i < bytes.length; i += 1) bytes[i] = Number.parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  for (let i = 0; i < bytes.length; i += 1) {
+    bytes[i] = Number.parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
   return bytes;
 }
 
