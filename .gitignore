@@ -1,0 +1,11 @@
+node_modules/
+.wrangler/
+.dev.vars
+.env
+*.db
+*.db-shm
+*.db-wal
+accounts.json
+scores.json
+.DS_Store
+Thumbs.db

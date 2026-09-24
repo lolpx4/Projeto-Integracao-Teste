@@ -1,0 +1,14 @@
+{
+  "name": "neon-apex",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8787",
+    "deploy": "wrangler deploy",
+    "check": "node --check src/worker.js && node --check public/script.js"
+  },
+  "devDependencies": {
+    "wrangler": "^4.40.0"
+  }
+}

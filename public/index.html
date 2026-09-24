@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#050914">
+  <title>Neon Apex</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="ambient-grid" aria-hidden="true"></div>
+  <main class="app-shell">
+    <section class="view auth-view active" id="loginView">
+      <div class="login-scene">
+        <div class="hero-copy">
+          <div class="brand-wordmark">NEON<br><span>APEX</span></div>
+          <p>Corrida urbana 2D. Três máquinas. Uma linha perfeita.</p>
+        </div>
+        <div class="login-panel">
+          <div class="panel-topline"></div>
+          <p class="eyebrow" id="authEyebrow">ACESSO AO GRID</p>
+          <h1 id="loginTitle">FAÇA SEU LOGIN</h1>
+          <form id="loginForm" class="login-form">
+            <label for="playerName">Usuário</label>
+            <div class="input-wrap"><span>◉</span><input id="playerName" maxlength="16" autocomplete="username" placeholder="Seu codinome" required></div>
+            <label for="playerPassword">Senha</label>
+            <div class="input-wrap"><span>✦</span><input id="playerPassword" type="password" minlength="5" maxlength="72" autocomplete="current-password" placeholder="5 caracteres ou mais" required></div>
+            <button class="primary-button" id="submitLoginButton" type="submit">ENTRAR <span>↗</span></button>
+            <button class="secondary-button" id="toggleCreateModeButton" type="button">CRIAR USUÁRIO</button>
+            <p class="api-status" id="apiStatus">Somente contas salvas no banco podem acessar.</p>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section class="view main-view" id="mainView">
+      <header class="topbar">
+        <div class="brand-lockup"><span class="brand-mark">N/A</span><span>NEON APEX</span></div>
+        <div class="player-chip"><span class="online-indicator"></span><span id="menuPlayer">PILOTO</span><button class="text-button logout-button" type="button">sair</button></div>
+      </header>
+      <div class="menu-layout">
+        <div>
+          <p class="eyebrow">TEMPORADA 01 // NEON CITY</p>
+          <h1>Domine<br><em>o asfalto.</em></h1>
+          <p class="lead">A pista se move, os rivais têm movimento próprio e colisões bloqueiam ultrapassagens impossíveis.</p>
+          <button class="primary-button menu-play" id="menuPlayButton" type="button">CORRIDA RÁPIDA <span>↗</span></button>
+          <div class="quick-stats"><span>NÍVEL <strong id="menuLevel">1</strong></span><span>MOEDAS <strong id="menuCoins">1.000</strong></span><span>CORRIDAS <strong id="menuRaces">0</strong></span></div>
+        </div>
+        <div class="menu-side">
+          <button class="menu-tile" id="menuGarageButton" type="button"><span>01</span><strong>GARAGEM</strong><small>Escolha sua máquina</small></button>
+          <button class="menu-tile" id="menuProfileButton" type="button"><span>02</span><strong>PERFIL</strong><small>Progresso salvo no banco</small></button>
+          <button class="menu-tile" id="menuRankingButton" type="button"><span>03</span><strong>RANKING</strong><small>Melhor tempo de cada piloto</small></button>
+        </div>
+      </div>
+    </section>
+
+    <section class="view garage-view" id="garageView">
+      <header class="topbar">
+        <button class="back-button" data-back-main type="button">← MENU</button>
+        <div class="brand-lockup"><span class="brand-mark">N/A</span><span>GARAGEM</span></div>
+        <div class="player-chip"><span id="garagePlayer">PILOTO</span><button class="text-button logout-button" type="button">sair</button></div>
+      </header>
+      <div class="garage-header"><div><p class="eyebrow">SUA COLEÇÃO</p><h1>Escolha sua máquina.</h1></div><p>Os atributos alteram a física da corrida.</p></div>
+      <div class="car-grid" id="carGrid"></div>
+      <div class="garage-action"><div><span>ESCOLHIDO</span><strong id="selectedCarName">VOLT R</strong></div><button class="primary-button" id="startButton" type="button">LIGAR MOTOR <span>↗</span></button></div>
+    </section>
+
+    <section class="view race-view" id="raceView">
+      <header class="race-header">
+        <button class="back-button" id="backGarageButton" type="button">← GARAGEM</button>
+        <div class="race-status"><span class="online-indicator"></span><span>CORRIDA AO VIVO</span><span class="divider"></span><span id="racePlayer">PILOTO</span></div>
+        <button class="text-button" id="restartButton" type="button">reiniciar ↻</button>
+      </header>
+      <div class="race-hud">
+        <div class="hud-block"><span>VOLTA</span><strong><b id="lapNumber">01</b><small> / 03</small></strong></div>
+        <div class="hud-block"><span>VELOCIDADE</span><strong><b id="speedValue">000</b><small> KM/H</small></strong></div>
+        <div class="hud-block timer-block"><span>TEMPO</span><strong id="timer">00:00.000</strong></div>
+        <div class="hud-block nitro-block"><span>NITRO <b id="nitroValue">100</b>%</span><div class="nitro-bar"><i id="nitroBar"></i></div></div>
+      </div>
+      <div class="track-frame">
+        <canvas id="raceCanvas" width="1000" height="620" aria-label="Pista Neon City"></canvas>
+        <div class="countdown" id="countdown">3</div>
+        <div class="race-message" id="raceMessage"><strong>WASD / SETAS</strong><span>SHIFT ativa o nitro. Colisões bloqueiam os carros.</span></div>
+      </div>
+      <div class="race-controls"><span><kbd>W</kbd> acelerar</span><span><kbd>S</kbd> frear</span><span><kbd>A</kbd><kbd>D</kbd> direção</span><span><kbd>SHIFT</kbd> nitro</span></div>
+      <div class="touch-controls" id="touchControls"><button data-control="left">←</button><button data-control="brake">■</button><button data-control="up">↑</button><button data-control="nitro">⚡</button><button data-control="right">→</button></div>
+    </section>
+
+    <section class="view info-view" id="profileView">
+      <header class="topbar"><button class="back-button" data-back-main type="button">← MENU</button><div class="brand-lockup"><span class="brand-mark">N/A</span><span>PERFIL</span></div><span></span></header>
+      <div class="info-panel"><p class="eyebrow">PILOTO</p><h1 id="profileName">—</h1><div class="stat-grid"><article><span>Nível</span><strong id="profileLevel">1</strong></article><article><span>XP</span><strong id="profileXp">0</strong></article><article><span>Moedas</span><strong id="profileCoins">0</strong></article><article><span>Corridas</span><strong id="profileRaces">0</strong></article><article class="wide"><span>Melhor tempo</span><strong id="profileBest">—</strong></article><article class="wide"><span>Carro atual</span><strong id="profileCar">—</strong></article></div></div>
+    </section>
+
+    <section class="view info-view" id="rankingView">
+      <header class="topbar"><button class="back-button" data-back-main type="button">← MENU</button><div class="brand-lockup"><span class="brand-mark">N/A</span><span>RANKING</span></div><span></span></header>
+      <div class="info-panel"><p class="eyebrow">TOP 10 // MELHOR TEMPO POR PILOTO</p><h1>Os mais rápidos.</h1><div class="leaderboard" id="rankingRows"></div></div>
+    </section>
+
+    <section class="view result-view" id="resultView">
+      <div class="result-panel">
+        <div class="brand-lockup"><span class="brand-mark">N/A</span><span>NEON APEX</span></div>
+        <p class="eyebrow">CORRIDA FINALIZADA</p>
+        <h1>Boa linha, <em id="resultName">piloto.</em></h1>
+        <div class="result-time"><span>SEU TEMPO</span><strong id="resultTime">00:00.000</strong></div>
+        <p id="resultCopy">Sincronizando resultado...</p>
+        <div class="result-actions"><button class="primary-button" id="raceAgainButton" type="button">CORRER NOVAMENTE <span>↗</span></button><button class="secondary-button" id="resultGarageButton" type="button">GARAGEM</button><button class="secondary-button" id="resultMenuButton" type="button">MENU</button></div>
+        <div class="leaderboard"><div class="board-heading"><span>RANKING</span><span>TOP 10</span></div><div id="leaderboardRows"></div></div>
+      </div>
+    </section>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>
