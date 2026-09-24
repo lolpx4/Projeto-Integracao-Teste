@@ -1,13 +1,21 @@
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
-const MIN_RACE_MS = 8000;
-const MAX_RACE_MS = 1000 * 60 * 10;
-const TRACK_KEY = 'neon-city';
+const MIN_RACE_MS = 15000;
+const MAX_RACE_MS = 1000 * 60 * 15;
+const MAX_UPGRADE_LEVEL = 5;
+
+const TRACKS = {
+  'neon-city': { key: 'neon-city', name: 'NEON CITY', coinCount: 28, coinValue: 25 },
+  'desert-pulse': { key: 'desert-pulse', name: 'DESERT PULSE', coinCount: 32, coinValue: 30 },
+  'arctic-circuit': { key: 'arctic-circuit', name: 'ARCTIC CIRCUIT', coinCount: 30, coinValue: 30 },
+};
 
 const CARS = {
   red: { key: 'red', name: 'VOLT R', speed: 90, acceleration: 84, braking: 77, handling: 72, nitro: 80 },
   purple: { key: 'purple', name: 'VIOLET X', speed: 85, acceleration: 92, braking: 70, handling: 90, nitro: 88 },
   blue: { key: 'blue', name: 'OCEAN GT', speed: 96, acceleration: 76, braking: 82, handling: 78, nitro: 94 },
 };
+
+const UPGRADE_STATS = new Set(['speed', 'acceleration', 'braking', 'handling', 'nitro']);
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS users (
@@ -47,9 +55,21 @@ const SCHEMA = [
     track TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );`,
+  `CREATE TABLE IF NOT EXISTS car_upgrades (
+    username TEXT NOT NULL,
+    car TEXT NOT NULL,
+    speed INTEGER NOT NULL DEFAULT 0,
+    acceleration INTEGER NOT NULL DEFAULT 0,
+    braking INTEGER NOT NULL DEFAULT 0,
+    handling INTEGER NOT NULL DEFAULT 0,
+    nitro INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (username, car)
+  );`,
   `CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);`,
   `CREATE INDEX IF NOT EXISTS idx_race_results_time ON race_results(time_ms);`,
   `CREATE INDEX IF NOT EXISTS idx_race_results_user ON race_results(username);`,
+  `CREATE INDEX IF NOT EXISTS idx_race_results_track ON race_results(track);`,
 ];
 
 let schemaReady = false;
@@ -58,13 +78,8 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    if (!url.pathname.startsWith('/api/')) {
-      return env.ASSETS.fetch(request);
-    }
-
-    if (!env.DB) {
-      return json({ error: 'Banco D1 não configurado. Crie um binding chamado DB no Cloudflare Dashboard.' }, 503);
-    }
+    if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
+    if (!env.DB) return json({ error: 'Banco D1 não configurado. Crie um binding chamado DB no Cloudflare Dashboard.' }, 503);
 
     try {
       await ensureSchema(env);
@@ -78,11 +93,7 @@ export default {
 
 async function ensureSchema(env) {
   if (schemaReady) return;
-
-  for (const statement of SCHEMA) {
-    await env.DB.prepare(statement).run();
-  }
-
+  for (const statement of SCHEMA) await env.DB.prepare(statement).run();
   schemaReady = true;
 }
 
@@ -91,14 +102,13 @@ async function handleApi(request, env, url) {
   const method = request.method.toUpperCase();
 
   if (pathname === '/api/health' && method === 'GET') {
-    return json({ ok: true, service: 'neon-apex', database: 'd1' });
+    return json({ ok: true, service: 'neon-apex', database: 'd1', progression: true, tracks: Object.keys(TRACKS) });
   }
 
   if (pathname === '/api/register' && method === 'POST') {
     const data = await readJson(request);
     const username = sanitizeUsername(data.player);
     const password = String(data.password || '');
-
     const validation = validateCredentials(username, password);
     if (validation) return json({ error: validation }, 400);
 
@@ -108,34 +118,28 @@ async function handleApi(request, env, url) {
     const salt = randomToken(16);
     const hash = await hashPassword(password, salt);
     const now = Date.now();
-
     await env.DB.prepare(`
       INSERT INTO users (username, password_hash, password_salt, level, xp, coins, races, best_time, selected_car, created_at, updated_at)
       VALUES (?, ?, ?, 1, 0, 1000, 0, NULL, 'red', ?, ?)
     `).bind(username, hash, salt, now, now).run();
 
     const token = await createSession(env, username);
-    const profile = await getProfile(env, username);
-    return json({ ok: true, token, profile }, 201);
+    return json({ ok: true, token, profile: await getProfile(env, username), upgrades: await getAllUpgrades(env, username) }, 201);
   }
 
   if (pathname === '/api/login' && method === 'POST') {
     const data = await readJson(request);
     const username = sanitizeUsername(data.player);
     const password = String(data.password || '');
-
     const validation = validateCredentials(username, password);
     if (validation) return json({ error: 'Usuário ou senha inválidos.' }, 400);
 
     const user = await env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(username).first();
     if (!user) return json({ error: 'Usuário ou senha inválidos.' }, 401);
-
-    const valid = await verifyPassword(password, user.password_salt, user.password_hash);
-    if (!valid) return json({ error: 'Usuário ou senha inválidos.' }, 401);
+    if (!await verifyPassword(password, user.password_salt, user.password_hash)) return json({ error: 'Usuário ou senha inválidos.' }, 401);
 
     const token = await createSession(env, username);
-    const profile = publicProfile(user);
-    return json({ ok: true, token, profile });
+    return json({ ok: true, token, profile: publicProfile(user), upgrades: await getAllUpgrades(env, username) });
   }
 
   if (pathname === '/api/logout' && method === 'POST') {
@@ -153,8 +157,7 @@ async function handleApi(request, env, url) {
   if (pathname === '/api/profile' && method === 'GET') {
     const session = await requireSession(request, env);
     if (session.response) return session.response;
-    const profile = await getProfile(env, session.username);
-    return json({ ok: true, profile, cars: Object.values(CARS) });
+    return json({ ok: true, profile: await getProfile(env, session.username), cars: Object.values(CARS), upgrades: await getAllUpgrades(env, session.username) });
   }
 
   if (pathname === '/api/profile/car' && method === 'POST') {
@@ -163,11 +166,46 @@ async function handleApi(request, env, url) {
     const data = await readJson(request);
     const car = String(data.car || '');
     if (!CARS[car]) return json({ error: 'Carro inválido.' }, 400);
+    await env.DB.prepare('UPDATE users SET selected_car = ?, updated_at = ? WHERE username = ?').bind(car, Date.now(), session.username).run();
+    return json({ ok: true, profile: await getProfile(env, session.username) });
+  }
 
-    await env.DB.prepare('UPDATE users SET selected_car = ?, updated_at = ? WHERE username = ?')
-      .bind(car, Date.now(), session.username).run();
-    const profile = await getProfile(env, session.username);
-    return json({ ok: true, profile });
+  if (pathname === '/api/upgrade' && method === 'POST') {
+    const session = await requireSession(request, env);
+    if (session.response) return session.response;
+    const data = await readJson(request);
+    const car = String(data.car || '');
+    const stat = String(data.stat || '');
+    if (!CARS[car]) return json({ error: 'Carro inválido.' }, 400);
+    if (!UPGRADE_STATS.has(stat)) return json({ error: 'Melhoria inválida.' }, 400);
+
+    const user = await env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(session.username).first();
+    if (!user) return json({ error: 'Usuário não encontrado.' }, 401);
+    const upgrades = await getUpgradeRow(env, session.username, car);
+    const currentLevel = Number(upgrades[stat] || 0);
+    if (currentLevel >= MAX_UPGRADE_LEVEL) return json({ error: 'Este atributo já está no nível máximo.' }, 409);
+
+    const cost = upgradeCost(currentLevel);
+    if (Number(user.coins || 0) < cost) return json({ error: `Você precisa de ${cost} moedas.` }, 400);
+
+    const next = { ...upgrades, [stat]: currentLevel + 1 };
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare('UPDATE users SET coins = coins - ?, updated_at = ? WHERE username = ?').bind(cost, now, session.username),
+      env.DB.prepare(`
+        INSERT INTO car_upgrades (username, car, speed, acceleration, braking, handling, nitro, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(username, car) DO UPDATE SET
+          speed = excluded.speed,
+          acceleration = excluded.acceleration,
+          braking = excluded.braking,
+          handling = excluded.handling,
+          nitro = excluded.nitro,
+          updated_at = excluded.updated_at
+      `).bind(session.username, car, next.speed, next.acceleration, next.braking, next.handling, next.nitro, now),
+    ]);
+
+    return json({ ok: true, cost, profile: await getProfile(env, session.username), upgrades: await getAllUpgrades(env, session.username) });
   }
 
   if (pathname === '/api/race/cancel' && method === 'POST') {
@@ -182,14 +220,16 @@ async function handleApi(request, env, url) {
   }
 
   if (pathname === '/api/leaderboard' && method === 'GET') {
+    const track = TRACKS[url.searchParams.get('track')] ? url.searchParams.get('track') : 'neon-city';
     const result = await env.DB.prepare(`
       SELECT rr.username AS player, MIN(rr.time_ms) AS time
       FROM race_results rr
+      WHERE rr.track = ?
       GROUP BY rr.username
       ORDER BY time ASC, player ASC
       LIMIT 10
-    `).all();
-    return json({ scores: result.results || [] });
+    `).bind(track).all();
+    return json({ track, scores: result.results || [] });
   }
 
   if (pathname === '/api/race/start' && method === 'POST') {
@@ -197,19 +237,18 @@ async function handleApi(request, env, url) {
     if (session.response) return session.response;
     const data = await readJson(request);
     const car = String(data.car || 'red');
+    const track = String(data.track || 'neon-city');
     if (!CARS[car]) return json({ error: 'Carro inválido.' }, 400);
+    if (!TRACKS[track]) return json({ error: 'Circuito inválido.' }, 400);
 
     const now = Date.now();
     const raceId = randomToken(24);
     await env.DB.prepare(`
       INSERT INTO race_runs (id, username, car, track, started_at, status)
       VALUES (?, ?, ?, ?, ?, 'active')
-    `).bind(raceId, session.username, car, TRACK_KEY, now).run();
-
-    await env.DB.prepare('UPDATE users SET selected_car = ?, updated_at = ? WHERE username = ?')
-      .bind(car, now, session.username).run();
-
-    return json({ ok: true, raceId, startedAt: now });
+    `).bind(raceId, session.username, car, track, now).run();
+    await env.DB.prepare('UPDATE users SET selected_car = ?, updated_at = ? WHERE username = ?').bind(car, now, session.username).run();
+    return json({ ok: true, raceId, startedAt: now, track });
   }
 
   if (pathname === '/api/race/finish' && method === 'POST') {
@@ -219,25 +258,24 @@ async function handleApi(request, env, url) {
     const raceId = String(data.raceId || '');
     if (!raceId) return json({ error: 'Corrida inválida.' }, 400);
 
-    const race = await env.DB.prepare('SELECT * FROM race_runs WHERE id = ? AND username = ?')
-      .bind(raceId, session.username).first();
+    const race = await env.DB.prepare('SELECT * FROM race_runs WHERE id = ? AND username = ?').bind(raceId, session.username).first();
     if (!race || race.status !== 'active') return json({ error: 'Corrida não encontrada ou já finalizada.' }, 409);
 
     const now = Date.now();
     const elapsed = now - Number(race.started_at);
-    if (elapsed < MIN_RACE_MS) {
-      return json({ error: 'Resultado inválido: corrida concluída rápido demais.' }, 400);
-    }
+    if (elapsed < MIN_RACE_MS) return json({ error: 'Resultado inválido: corrida concluída rápido demais.' }, 400);
     if (elapsed > MAX_RACE_MS) {
-      await env.DB.prepare("UPDATE race_runs SET status = 'expired', finished_at = ? WHERE id = ?")
-        .bind(now, raceId).run();
+      await env.DB.prepare("UPDATE race_runs SET status = 'expired', finished_at = ? WHERE id = ?").bind(now, raceId).run();
       return json({ error: 'A corrida expirou.' }, 400);
     }
 
     const user = await env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(session.username).first();
     if (!user) return json({ error: 'Usuário não encontrado.' }, 401);
 
-    const rewards = computeRewards(elapsed);
+    const track = TRACKS[race.track] || TRACKS['neon-city'];
+    const requestedCoins = Number.parseInt(data.collectedCoins, 10);
+    const collectedCoins = Number.isFinite(requestedCoins) ? Math.max(0, Math.min(track.coinCount, requestedCoins)) : 0;
+    const rewards = computeRewards(elapsed, collectedCoins, track);
     const nextXp = Number(user.xp || 0) + rewards.xp;
     const nextCoins = Number(user.coins || 0) + rewards.coins;
     const nextLevel = computeLevel(nextXp);
@@ -245,10 +283,8 @@ async function handleApi(request, env, url) {
 
     await env.DB.batch([
       env.DB.prepare("UPDATE race_runs SET status = 'finished', finished_at = ? WHERE id = ?").bind(now, raceId),
-      env.DB.prepare(`
-        INSERT INTO race_results (username, time_ms, car, track, created_at)
-        VALUES (?, ?, ?, ?, ?)
-      `).bind(session.username, elapsed, race.car, race.track, now),
+      env.DB.prepare('INSERT INTO race_results (username, time_ms, car, track, created_at) VALUES (?, ?, ?, ?, ?)')
+        .bind(session.username, elapsed, race.car, race.track, now),
       env.DB.prepare(`
         UPDATE users
         SET races = races + 1, xp = ?, coins = ?, level = ?, best_time = ?, selected_car = ?, updated_at = ?
@@ -256,11 +292,42 @@ async function handleApi(request, env, url) {
       `).bind(nextXp, nextCoins, nextLevel, nextBest, race.car, now, session.username),
     ]);
 
-    const profile = await getProfile(env, session.username);
-    return json({ ok: true, time: elapsed, rewards, profile });
+    return json({
+      ok: true,
+      time: elapsed,
+      track: race.track,
+      collectedCoins,
+      rewards,
+      profile: await getProfile(env, session.username),
+      upgrades: await getAllUpgrades(env, session.username),
+    });
   }
 
   return json({ error: 'Rota não encontrada.' }, 404);
+}
+
+function upgradeCost(level) {
+  return 400 + Number(level || 0) * 550;
+}
+
+async function getUpgradeRow(env, username, car) {
+  const row = await env.DB.prepare('SELECT speed, acceleration, braking, handling, nitro FROM car_upgrades WHERE username = ? AND car = ?')
+    .bind(username, car).first();
+  return row || { speed: 0, acceleration: 0, braking: 0, handling: 0, nitro: 0 };
+}
+
+async function getAllUpgrades(env, username) {
+  const result = await env.DB.prepare('SELECT car, speed, acceleration, braking, handling, nitro FROM car_upgrades WHERE username = ?').bind(username).all();
+  const upgrades = {};
+  for (const key of Object.keys(CARS)) upgrades[key] = { speed: 0, acceleration: 0, braking: 0, handling: 0, nitro: 0 };
+  for (const row of result.results || []) {
+    if (!CARS[row.car]) continue;
+    upgrades[row.car] = {
+      speed: Number(row.speed || 0), acceleration: Number(row.acceleration || 0), braking: Number(row.braking || 0),
+      handling: Number(row.handling || 0), nitro: Number(row.nitro || 0),
+    };
+  }
+  return upgrades;
 }
 
 async function createSession(env, username) {
@@ -275,7 +342,6 @@ async function createSession(env, username) {
 async function requireSession(request, env) {
   const token = getBearer(request);
   if (!token) return { response: json({ error: 'Sessão não encontrada.' }, 401) };
-
   const session = await env.DB.prepare('SELECT * FROM sessions WHERE token = ?').bind(token).first();
   if (!session || Number(session.expires_at) < Date.now()) {
     if (session) await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
@@ -306,11 +372,12 @@ function computeLevel(xp) {
   return Math.max(1, Math.floor(Number(xp || 0) / 500) + 1);
 }
 
-function computeRewards(timeMs) {
+function computeRewards(timeMs, collectedCoins, track) {
   const seconds = timeMs / 1000;
-  const coins = Math.max(180, Math.min(650, Math.round(760 - seconds * 6)));
-  const xp = Math.max(90, Math.min(350, Math.round(400 - seconds * 3)));
-  return { coins, xp };
+  const baseCoins = Math.max(180, Math.min(650, Math.round(820 - seconds * 4.5)));
+  const pickupCoins = collectedCoins * track.coinValue;
+  const xp = Math.max(100, Math.min(420, Math.round(460 - seconds * 2.2)));
+  return { coins: baseCoins + pickupCoins, baseCoins, pickupCoins, xp };
 }
 
 function validateCredentials(username, password) {
@@ -330,21 +397,14 @@ function getBearer(request) {
 }
 
 async function readJson(request) {
-  try {
-    return await request.json();
-  } catch {
-    return {};
-  }
+  try { return await request.json(); } catch { return {}; }
 }
 
 async function hashPassword(password, saltHex) {
   const encoder = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits({
-    name: 'PBKDF2',
-    salt: hexToBytes(saltHex),
-    iterations: 100000,
-    hash: 'SHA-256',
+    name: 'PBKDF2', salt: hexToBytes(saltHex), iterations: 100000, hash: 'SHA-256',
   }, keyMaterial, 256);
   return bytesToHex(new Uint8Array(bits));
 }
