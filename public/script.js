@@ -78,9 +78,42 @@ const state = {
 
 window.__state = state;
 
+function isTouchDevice() {
+  return (
+    window.matchMedia('(hover: none)').matches ||
+    window.matchMedia('(pointer: coarse)').matches ||
+    navigator.maxTouchPoints > 0
+  );
+}
+
+function updateOrientationHint() {
+  const hint = $('orientationHint');
+  if (!hint) return;
+
+  const portrait = window.matchMedia('(orientation: portrait)').matches;
+  const shouldShow =
+    state.currentView === 'raceView' &&
+    isTouchDevice() &&
+    portrait;
+
+  hint.classList.toggle('visible', shouldShow);
+}
+
+function updateControlHint() {
+  const hint = $('raceControlHint');
+  if (!hint) return;
+
+  hint.textContent = isTouchDevice()
+    ? 'Use os botões na tela. Você pode acelerar, virar e usar nitro ao mesmo tempo.'
+    : 'WASD/SETAS para dirigir. SHIFT ativa nitro. Encoste lateralmente para empurrar rivais.';
+}
+
 function showView(id) {
   views.forEach((view) => $(view).classList.toggle('active', view === id));
   state.currentView = id;
+  document.body.classList.toggle('race-mode', id === 'raceView');
+  updateControlHint();
+  updateOrientationHint();
 }
 
 async function api(path, options = {}, auth = true) {
@@ -1982,26 +2015,132 @@ window.addEventListener('keyup', (event) => {
   state.keys.delete(key);
 });
 
+const activeTouchPointers = new Map();
+
+function releaseTouchPointer(pointerId) {
+  const entry = activeTouchPointers.get(pointerId);
+  if (!entry) return;
+
+  activeTouchPointers.delete(pointerId);
+  entry.button.classList.remove('pressed');
+
+  const stillActive = [...activeTouchPointers.values()]
+    .some((item) => item.control === entry.control);
+
+  if (!stillActive) state.keys.delete(entry.control);
+}
+
 $('touchControls')
   .querySelectorAll('button')
   .forEach((button) => {
     const control = button.dataset.control;
 
-    const press = (event) => {
+    button.addEventListener('pointerdown', (event) => {
       event.preventDefault();
+
+      try {
+        button.setPointerCapture(event.pointerId);
+      } catch {
+        // Alguns navegadores móveis não implementam pointer capture.
+      }
+
+      activeTouchPointers.set(event.pointerId, {
+        button,
+        control,
+      });
+
+      button.classList.add('pressed');
       state.keys.add(control);
-    };
+    });
 
     const release = (event) => {
       event.preventDefault();
-      state.keys.delete(control);
+      releaseTouchPointer(event.pointerId);
     };
 
-    button.addEventListener('pointerdown', press);
     button.addEventListener('pointerup', release);
     button.addEventListener('pointercancel', release);
-    button.addEventListener('pointerleave', release);
+    button.addEventListener('lostpointercapture', release);
+    button.addEventListener('contextmenu', (event) => event.preventDefault());
   });
+
+window.addEventListener('blur', () => {
+  state.keys.clear();
+  activeTouchPointers.clear();
+
+  document
+    .querySelectorAll('.touch-button.pressed')
+    .forEach((button) => button.classList.remove('pressed'));
+});
+
+window.addEventListener('resize', updateOrientationHint);
+window.addEventListener('orientationchange', () => {
+  setTimeout(updateOrientationHint, 120);
+});
+
+document.addEventListener('touchmove', (event) => {
+  if (state.currentView === 'raceView') {
+    event.preventDefault();
+  }
+}, { passive: false });
+
+async function toggleFullscreen() {
+  const root = document.documentElement;
+  const fullscreenElement =
+    document.fullscreenElement ||
+    document.webkitFullscreenElement;
+
+  try {
+    if (!fullscreenElement) {
+      const request =
+        root.requestFullscreen ||
+        root.webkitRequestFullscreen;
+
+      if (request) {
+        await request.call(root);
+
+        if (
+          isTouchDevice() &&
+          screen.orientation &&
+          typeof screen.orientation.lock === 'function'
+        ) {
+          try {
+            await screen.orientation.lock('landscape');
+          } catch {
+            // Rotação continua manual quando o navegador não permite bloquear.
+          }
+        }
+      }
+    } else {
+      const exit =
+        document.exitFullscreen ||
+        document.webkitExitFullscreen;
+
+      if (exit) await exit.call(document);
+    }
+  } catch {
+    // Tela cheia é opcional e varia entre navegadores.
+  }
+}
+
+$('fullscreenButton').addEventListener('click', toggleFullscreen);
+
+function updateFullscreenLabel() {
+  const button = $('fullscreenButton');
+  if (!button) return;
+
+  const active = Boolean(
+    document.fullscreenElement ||
+    document.webkitFullscreenElement
+  );
+
+  button.textContent = active
+    ? 'sair da tela cheia ⛶'
+    : 'tela cheia ⛶';
+}
+
+document.addEventListener('fullscreenchange', updateFullscreenLabel);
+document.addEventListener('webkitfullscreenchange', updateFullscreenLabel);
 
 (async function boot() {
   renderTracks();
