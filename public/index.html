@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="progression.css">
 </head>
 <body>
   <div class="ambient-grid" aria-hidden="true"></div>
@@ -17,7 +18,7 @@
       <div class="login-scene">
         <div class="hero-copy">
           <div class="brand-wordmark">NEON<br><span>APEX</span></div>
-          <p>Corrida urbana 2D. Três máquinas. Uma linha perfeita.</p>
+          <p>Corrida urbana 2D com progressão, moedas na pista, melhorias e três circuitos.</p>
         </div>
         <div class="login-panel">
           <div class="panel-topline"></div>
@@ -43,16 +44,16 @@
       </header>
       <div class="menu-layout">
         <div>
-          <p class="eyebrow">TEMPORADA 01 // NEON CITY</p>
+          <p class="eyebrow" id="menuTrackEyebrow">TEMPORADA 01 // NEON CITY</p>
           <h1>Domine<br><em>o asfalto.</em></h1>
-          <p class="lead">A pista se move, os rivais têm movimento próprio e colisões bloqueiam ultrapassagens impossíveis.</p>
+          <p class="lead">Corridas mais longas, moedas coletáveis, linha de chegada e upgrades permanentes para cada carro.</p>
           <button class="primary-button menu-play" id="menuPlayButton" type="button">CORRIDA RÁPIDA <span>↗</span></button>
           <div class="quick-stats"><span>NÍVEL <strong id="menuLevel">1</strong></span><span>MOEDAS <strong id="menuCoins">1.000</strong></span><span>CORRIDAS <strong id="menuRaces">0</strong></span></div>
         </div>
         <div class="menu-side">
-          <button class="menu-tile" id="menuGarageButton" type="button"><span>01</span><strong>GARAGEM</strong><small>Escolha sua máquina</small></button>
+          <button class="menu-tile" id="menuGarageButton" type="button"><span>01</span><strong>GARAGEM</strong><small>Carro, mapa e melhorias</small></button>
           <button class="menu-tile" id="menuProfileButton" type="button"><span>02</span><strong>PERFIL</strong><small>Progresso salvo no banco</small></button>
-          <button class="menu-tile" id="menuRankingButton" type="button"><span>03</span><strong>RANKING</strong><small>Melhor tempo de cada piloto</small></button>
+          <button class="menu-tile" id="menuRankingButton" type="button"><span>03</span><strong>RANKING</strong><small>Melhor tempo do circuito atual</small></button>
         </div>
       </div>
     </section>
@@ -63,27 +64,40 @@
         <div class="brand-lockup"><span class="brand-mark">N/A</span><span>GARAGEM</span></div>
         <div class="player-chip"><span id="garagePlayer">PILOTO</span><button class="text-button logout-button" type="button">sair</button></div>
       </header>
-      <div class="garage-header"><div><p class="eyebrow">SUA COLEÇÃO</p><h1>Escolha sua máquina.</h1></div><p>Os atributos alteram a física da corrida.</p></div>
+
+      <div class="garage-header"><div><p class="eyebrow">SUA COLEÇÃO</p><h1>Escolha e evolua.</h1></div><p>Use as moedas conquistadas nas pistas para aumentar os atributos dos carros.</p></div>
       <div class="car-grid" id="carGrid"></div>
-      <div class="garage-action"><div><span>ESCOLHIDO</span><strong id="selectedCarName">VOLT R</strong></div><button class="primary-button" id="startButton" type="button">LIGAR MOTOR <span>↗</span></button></div>
+
+      <section class="progression-section">
+        <div class="section-heading"><div><p class="eyebrow">EVOLUÇÃO</p><h2 id="upgradeCarName">VOLT R</h2></div><div class="wallet-pill">◉ <strong id="garageCoins">0</strong></div></div>
+        <div class="upgrade-panel" id="upgradePanel"></div>
+      </section>
+
+      <section class="progression-section">
+        <div class="section-heading"><div><p class="eyebrow">CIRCUITOS</p><h2>Escolha o mapa.</h2></div><small>Todos os mapas estão disponíveis.</small></div>
+        <div class="track-grid" id="trackGrid"></div>
+      </section>
+
+      <div class="garage-action"><div><span>ESCOLHIDO</span><strong id="selectedCarName">VOLT R</strong><small id="selectedTrackName">NEON CITY</small></div><button class="primary-button" id="startButton" type="button">LIGAR MOTOR <span>↗</span></button></div>
     </section>
 
     <section class="view race-view" id="raceView">
       <header class="race-header">
         <button class="back-button" id="backGarageButton" type="button">← GARAGEM</button>
-        <div class="race-status"><span class="online-indicator"></span><span>CORRIDA AO VIVO</span><span class="divider"></span><span id="racePlayer">PILOTO</span></div>
+        <div class="race-status"><span class="online-indicator"></span><span id="raceTrackName">NEON CITY</span><span class="divider"></span><span id="racePlayer">PILOTO</span></div>
         <button class="text-button" id="restartButton" type="button">reiniciar ↻</button>
       </header>
       <div class="race-hud">
-        <div class="hud-block"><span>VOLTA</span><strong><b id="lapNumber">01</b><small> / 03</small></strong></div>
+        <div class="hud-block"><span>VOLTA</span><strong><b id="lapNumber">01</b><small id="lapTotal"> / 04</small></strong></div>
         <div class="hud-block"><span>VELOCIDADE</span><strong><b id="speedValue">000</b><small> KM/H</small></strong></div>
+        <div class="hud-block coin-hud"><span>MOEDAS</span><strong>◉ <b id="raceCoins">0</b></strong></div>
         <div class="hud-block timer-block"><span>TEMPO</span><strong id="timer">00:00.000</strong></div>
         <div class="hud-block nitro-block"><span>NITRO <b id="nitroValue">100</b>%</span><div class="nitro-bar"><i id="nitroBar"></i></div></div>
       </div>
       <div class="track-frame">
-        <canvas id="raceCanvas" width="1000" height="620" aria-label="Pista Neon City"></canvas>
+        <canvas id="raceCanvas" width="1000" height="620" aria-label="Pista de corrida"></canvas>
         <div class="countdown" id="countdown">3</div>
-        <div class="race-message" id="raceMessage"><strong>WASD / SETAS</strong><span>SHIFT ativa o nitro. Colisões bloqueiam os carros.</span></div>
+        <div class="race-message" id="raceMessage"><strong>WASD / SETAS</strong><span>SHIFT ativa o nitro. Colete moedas e cruze a linha de chegada.</span></div>
       </div>
       <div class="race-controls"><span><kbd>W</kbd> acelerar</span><span><kbd>S</kbd> frear</span><span><kbd>A</kbd><kbd>D</kbd> direção</span><span><kbd>SHIFT</kbd> nitro</span></div>
       <div class="touch-controls" id="touchControls"><button data-control="left">←</button><button data-control="brake">■</button><button data-control="up">↑</button><button data-control="nitro">⚡</button><button data-control="right">→</button></div>
@@ -96,7 +110,7 @@
 
     <section class="view info-view" id="rankingView">
       <header class="topbar"><button class="back-button" data-back-main type="button">← MENU</button><div class="brand-lockup"><span class="brand-mark">N/A</span><span>RANKING</span></div><span></span></header>
-      <div class="info-panel"><p class="eyebrow">TOP 10 // MELHOR TEMPO POR PILOTO</p><h1>Os mais rápidos.</h1><div class="leaderboard" id="rankingRows"></div></div>
+      <div class="info-panel"><p class="eyebrow" id="rankingTrackLabel">TOP 10 // NEON CITY</p><h1>Os mais rápidos.</h1><div class="leaderboard" id="rankingRows"></div></div>
     </section>
 
     <section class="view result-view" id="resultView">
