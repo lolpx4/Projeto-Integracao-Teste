@@ -104,7 +104,7 @@ function updateControlHint() {
   if (!hint) return;
 
   hint.textContent = isTouchDevice()
-    ? 'Use os botões na tela. Você pode acelerar, virar e usar nitro ao mesmo tempo.'
+    ? 'ACEL acelera normalmente. NITRO funciona sozinho e aplica o impulso.'
     : 'WASD/SETAS para dirigir. SHIFT ativa nitro. Encoste lateralmente para empurrar rivais.';
 }
 
@@ -507,7 +507,7 @@ function physicsFor(car) {
     acceleration: car.acceleration * 1.6,
     braking: car.braking * 1.95,
     handling: (245 + car.handling * 2.2) * track.grip,
-    nitroTopMultiplier: 1.2 + car.nitro / 520,
+    nitroTopMultiplier: 1.45 + car.nitro / 520,
   };
 }
 
@@ -1037,14 +1037,13 @@ function updateRace(timestamp) {
 
   const usingNitro =
     nitroPressed &&
-    state.nitro > 0.5 &&
-    accelerating;
+    state.nitro > 0.5;
 
   const topSpeed =
     physics.maxSpeed *
     (usingNitro ? physics.nitroTopMultiplier : 1);
 
-  if (accelerating) {
+  if (accelerating || usingNitro) {
     state.speed +=
       physics.acceleration *
       (usingNitro ? 1.38 : 1) *
